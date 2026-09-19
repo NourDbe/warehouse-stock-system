@@ -1,0 +1,13 @@
+{
+  "name": "nour/warehouse-stock-system",
+  "description": "Warehouse stock management system using PHP, PDO and MySQL",
+  "type": "project",
+  "autoload": {
+    "psr-4": {
+      "App\\": "src/"
+    }
+  },
+  "require": {
+    "php": ">=8.1"
+  }
+}
