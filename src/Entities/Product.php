@@ -26,8 +26,13 @@ final class Product
         private ?int $id = null,
         ?DateTimeImmutable $createdAt = null
     ) {
-        // Remove unnecessary spaces from the product name.
-        $this->name = trim($this->name);
+        
+        // Remove leading/trailing spaces and collapse repeated spaces.
+        $this->name = preg_replace(
+        '/\s+/',
+        ' ',
+        trim($this->name)
+        ) ?? '';
 
         // A product cannot exist without a valid name.
         if ($this->name === '') {

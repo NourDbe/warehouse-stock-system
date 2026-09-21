@@ -26,8 +26,24 @@ final class Supplier
         ?DateTimeImmutable $createdAt = null
     ) {
         // Normalize basic text input.
-        $this->name = trim($this->name);
-        $this->phone = trim($this->phone);
+        // Normalize the supplier name by removing unnecessary spaces.
+        $this->name = preg_replace(
+            '/\s+/',
+            ' ',
+            trim($this->name)
+        ) ?? '';
+
+        // Store phone numbers using digits only.
+        //
+        // Examples:
+        // 099 111 1111  -> 0991111111
+        // 099-111-1111  -> 0991111111
+        // (099)1111111  -> 0991111111
+        $this->phone = preg_replace(
+            '/\D+/',
+            '',
+            $this->phone
+        ) ?? '';
 
         if ($this->name === '') {
             throw new InvalidArgumentException(

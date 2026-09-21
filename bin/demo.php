@@ -3,32 +3,32 @@
 declare(strict_types=1);
 
 use App\Database\DatabaseConnection;
-use App\Entities\Product;
-use App\Entities\ProductSupplier;
-use App\Entities\Supplier;
+use App\Exceptions\DuplicateProductException;
+use App\Exceptions\DuplicateSupplierException;
 use App\Exceptions\InsufficientStockException;
 use App\Repositories\Pdo\PdoProductRepository;
 use App\Repositories\Pdo\PdoProductSupplierRepository;
 use App\Repositories\Pdo\PdoStockMovementRepository;
 use App\Repositories\Pdo\PdoSupplierRepository;
+use App\Services\CatalogService;
 use App\Services\InventoryService;
 
 // Load Composer's PSR-4 autoloader.
 require_once __DIR__ . '/../vendor/autoload.php';
 
-// Load database configuration.
+// Load the database configuration.
 $config = require __DIR__ . '/../config/database.php';
 
 try {
     // -----------------------------------------------------
-    // 1. Create the PDO connection.
+    // 1. Create the PDO database connection.
     // -----------------------------------------------------
     $pdo = DatabaseConnection::create($config);
 
     // -----------------------------------------------------
-    // 2. Create repository objects.
+    // 2. Create repository implementations.
     //
-    // All SQL and PDO operations remain inside repositories.
+    // SQL and PDO remain isolated inside repositories.
     // -----------------------------------------------------
     $productRepository =
         new PdoProductRepository($pdo);
@@ -43,11 +43,18 @@ try {
         new PdoStockMovementRepository($pdo);
 
     // -----------------------------------------------------
-    // 3. Create the inventory service.
-    //
-    // The service contains business logic and depends
-    // on repository interfaces instead of PDO directly.
+    // 3. Create application services.
     // -----------------------------------------------------
+
+    // CatalogService handles products, suppliers
+    // and product-supplier relationships.
+    $catalogService = new CatalogService(
+        $productRepository,
+        $supplierRepository,
+        $productSupplierRepository
+    );
+
+    // InventoryService handles stock IN and OUT operations.
     $inventoryService = new InventoryService(
         $productRepository,
         $productSupplierRepository,
@@ -60,16 +67,16 @@ try {
     // -----------------------------------------------------
     // 4. Create a demo product.
     //
-    // A timestamp is added to the name so the demo can
-    // be executed more than once without violating the
-    // UNIQUE constraint on product names.
+    // A timestamp keeps the demo product unique
+    // when the script is executed multiple times.
     // -----------------------------------------------------
     $productName =
         'Cement 50kg Demo ' . date('YmdHis');
 
-    $product = $productRepository->create(
-        new Product($productName)
-    );
+    $product =
+        $catalogService->createProduct(
+            $productName
+        );
 
     echo "Product created:" . PHP_EOL;
     echo "ID: {$product->getId()}" . PHP_EOL;
@@ -77,56 +84,104 @@ try {
     echo PHP_EOL;
 
     // -----------------------------------------------------
-    // 5. Find or create the demo supplier.
+    // 5. Test duplicate product prevention.
     //
-    // Phone is unique in the suppliers table, so we first
-    // check whether this supplier already exists.
+    // Extra spaces are added intentionally.
+    // Product normalization should remove them.
     // -----------------------------------------------------
-    $supplierPhone = '0991111111';
-
-    $supplier = $supplierRepository
-        ->findByPhone($supplierPhone);
-
-    if ($supplier === null) {
-        $supplier = $supplierRepository->create(
-            new Supplier(
-                'Al Noor Trading',
-                $supplierPhone
-            )
+    try {
+        $catalogService->createProduct(
+            "   {$productName}   "
         );
 
-        echo "Supplier created." . PHP_EOL;
-    } else {
-        echo "Existing supplier reused." . PHP_EOL;
+        echo "ERROR: Duplicate product was allowed."
+            . PHP_EOL;
+    } catch (DuplicateProductException $exception) {
+        echo "Duplicate product rejected correctly."
+            . PHP_EOL;
     }
 
-    echo "Supplier ID: {$supplier->getId()}" . PHP_EOL;
-    echo "Supplier: {$supplier->getName()}" . PHP_EOL;
     echo PHP_EOL;
 
     // -----------------------------------------------------
-    // 6. Link the product with the supplier.
+    // 6. Generate a unique demo phone number.
     //
-    // The purchase price belongs to the relationship
-    // between the product and supplier.
+    // The number is intentionally formatted with dashes
+    // so Supplier can normalize it before storing it.
+    // -----------------------------------------------------
+    $phoneDigits =
+        '09' . substr((string) time(), -8);
+
+    $formattedPhone =
+        substr($phoneDigits, 0, 3)
+        . '-'
+        . substr($phoneDigits, 3, 3)
+        . '-'
+        . substr($phoneDigits, 6);
+
+    $supplier =
+        $catalogService->createSupplier(
+            'Al Noor Trading',
+            $formattedPhone
+        );
+
+    echo "Supplier created:" . PHP_EOL;
+    echo "ID: {$supplier->getId()}" . PHP_EOL;
+    echo "Name: {$supplier->getName()}" . PHP_EOL;
+    echo "Stored phone: {$supplier->getPhone()}" . PHP_EOL;
+    echo PHP_EOL;
+
+    // -----------------------------------------------------
+    // 7. Test supplier phone normalization.
+    //
+    // This is the same phone number but written
+    // using spaces instead of dashes.
+    //
+    // Both formats should normalize to the same value.
+    // -----------------------------------------------------
+    $samePhoneDifferentFormat =
+        substr($phoneDigits, 0, 3)
+        . ' '
+        . substr($phoneDigits, 3, 3)
+        . ' '
+        . substr($phoneDigits, 6);
+
+    try {
+        $catalogService->createSupplier(
+            'Al Noor Trading Duplicate',
+            $samePhoneDifferentFormat
+        );
+
+        echo "ERROR: Duplicate supplier was allowed."
+            . PHP_EOL;
+    } catch (DuplicateSupplierException $exception) {
+        echo "Duplicate supplier rejected correctly."
+            . PHP_EOL;
+    }
+
+    echo PHP_EOL;
+
+    // -----------------------------------------------------
+    // 8. Link the product with the supplier.
+    //
+    // Purchase price belongs to this relationship.
     // -----------------------------------------------------
     $productSupplier =
-        new ProductSupplier(
+        $catalogService->linkProductToSupplier(
             $product->getId(),
             $supplier->getId(),
             '5.50'
         );
 
-    $productSupplierRepository->create(
-        $productSupplier
-    );
-
     echo "Product linked to supplier." . PHP_EOL;
-    echo "Purchase price: 5.50" . PHP_EOL;
+    echo "Purchase price: "
+        . $productSupplier->getPurchasePrice()
+        . PHP_EOL;
+
     echo PHP_EOL;
 
     // -----------------------------------------------------
-    // 7. Receive 100 units into the warehouse.
+    // 9. Receive 100 units.
     //
     // This creates an IN stock movement.
     // -----------------------------------------------------
@@ -147,7 +202,7 @@ try {
     echo PHP_EOL;
 
     // -----------------------------------------------------
-    // 8. Sell 30 units.
+    // 10. Sell 30 units.
     //
     // This creates an OUT movement.
     // -----------------------------------------------------
@@ -167,10 +222,10 @@ try {
     echo PHP_EOL;
 
     // -----------------------------------------------------
-    // 9. Try to sell more than the available stock.
+    // 11. Try to sell more than available stock.
     //
-    // Current stock should now be 70.
-    // Trying to sell 100 must fail.
+    // Current stock should be 70.
+    // Selling 100 must be rejected.
     // -----------------------------------------------------
     echo "Trying to sell 100 units..." . PHP_EOL;
 
@@ -180,8 +235,8 @@ try {
             '100'
         );
 
-        // This line should never execute.
-        echo "ERROR: Overselling was allowed." . PHP_EOL;
+        echo "ERROR: Overselling was allowed."
+            . PHP_EOL;
     } catch (InsufficientStockException $exception) {
         echo "Sale rejected correctly." . PHP_EOL;
         echo $exception->getMessage() . PHP_EOL;
@@ -190,7 +245,7 @@ try {
     echo PHP_EOL;
 
     // -----------------------------------------------------
-    // 10. Display final stock.
+    // 12. Display final stock.
     // -----------------------------------------------------
     $finalStock =
         $inventoryService->getCurrentStock(
@@ -201,7 +256,7 @@ try {
     echo PHP_EOL;
 
     // -----------------------------------------------------
-    // 11. Display movement history.
+    // 13. Display movement history.
     // -----------------------------------------------------
     echo "Movement history:" . PHP_EOL;
 
