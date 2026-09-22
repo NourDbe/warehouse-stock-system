@@ -1,7 +1,5 @@
 # Warehouse Stock System - ERD
 
-The following diagram represents the database structure of the warehouse stock system.
-
 mermaid
 erDiagram
 
@@ -33,8 +31,8 @@ erDiagram
     STOCK_MOVEMENTS {
         INT id PK
         INT product_id FK
-        INT supplier_id FK
-        VARCHAR type
+        INT supplier_id FK "Nullable for OUT"
+        VARCHAR type "IN or OUT"
         DECIMAL quantity
         TIMESTAMP created_at
     }
@@ -44,10 +42,10 @@ erDiagram
 
 - One Product can have many ProductSupplier records.
 - One Supplier can have many ProductSupplier records.
-- Products and Suppliers therefore have a Many-to-Many relationship.
+- Therefore, Products and Suppliers have a Many-to-Many relationship.
 - One Product can have many StockMovements.
-- A ProductSupplier relationship can be referenced by incoming stock movements.
-- OUT movements do not require a supplier.
+- An IN StockMovement must reference a valid Product-Supplier relationship.
+- An OUT StockMovement does not have a supplier.
 
 ## Main Relationships
 
@@ -58,3 +56,5 @@ Supplier 1 ------- N ProductSupplier
 Product N -------- N Supplier
 
 Product 1 -------- N StockMovement
+
+ProductSupplier 1 -------- N StockMovement (for IN movements)
